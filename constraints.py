@@ -1,6 +1,7 @@
 from . import ltldiff as ltd
 import torch
 from .domains import Box
+import numpy as np
 
 def constraint_loss(constraint, ins, targets, zs, net, rollout_func):
     cond = constraint.condition(zs, ins, targets, net, rollout_func)
