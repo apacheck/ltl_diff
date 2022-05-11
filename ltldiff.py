@@ -294,27 +294,69 @@ def soft_minimum(xs, dim, p=200):
 
     
 
-class Until:
+class Until1:
     def __init__(self, a, b, max_t):
         self.a = a
         self.b = b
         self.max_t = max_t
 
     def loss(self, t):
-        raise NotImplementedError()
+        # raise NotImplementedError()
+        assert t <= self.max_t
+        
+        # Old
+        b_losses = torch.stack([self.b.loss(jj) for jj in range(t, self.max_t)])
+        losses = soft_minimum(torch.stack([self.a.loss(t), self.b.loss(t)]), 0)[None, :]
+        for ii in range(t + 1, self.max_t):
+            one_loss = soft_minimum(torch.cat([self.a.loss(ii)[None, :], b_losses[:(ii + 1), :]]), 0)
+            losses = torch.cat([losses, one_loss[None, :]], 0)
+        #
+        # print("New: {} Old: {}".format(t_mid-t_start, time.time()-t_mid))
+        return soft_maximum(losses, 0)
 
     def satisfy(self, t):
         sats_a = torch.stack([self.a.satisfy(i) for i in range(t, self.max_t)])
         sats_b = torch.stack([self.b.satisfy(i) for i in range(t, self.max_t)])
 
-        eventually_b = sats_b.any(dim=0, keepdim=True)
-        bs_onward = torch.cumsum(sats_b.int(), dim=0)
+        eventually_b = sats_b.any(dim=0, keepdim=False)
+        bs_onward = torch.cumsum(sats_b.int(), dim=0) > 0
+
+        keep_a_until = (sats_a | bs_onward).all(dim=0, keepdim=False)
+
+        return eventually_b & keep_a_until
+
+
+class Until2:
+    def __init__(self, a, b, max_t):
+        self.a = a
+        self.b = b
+        self.max_t = max_t
+
+    def loss(self, t):
+        # raise NotImplementedError()
+        assert t <= self.max_t
+        losses = soft_minimum(torch.stack([self.a.loss(t), self.b.loss(t)]), 0)[None, :]
+        b_losses = torch.stack([self.b.loss(jj) for jj in range(t, self.max_t)])
+        for ii in range(t + 1, self.max_t):
+            one_loss = soft_minimum(torch.cat([self.a.loss(ii)[None, :], b_losses[:(ii + 1), :]]), 0)
+            losses = torch.cat([losses, one_loss[None, :]], 0)
+
+        return soft_maximum(losses, 0)
+
+    def satisfy(self, t):
+        sats_a = torch.stack([self.a.satisfy(i) for i in range(t, self.max_t)])
+        sats_b = torch.stack([self.b.satisfy(i) for i in range(t, self.max_t)])
+
+        eventually_b = sats_b
+        bs_onward = torch.cumsum(sats_b.int(), dim=0) > 0
 
         keep_a_until = (sats_a | bs_onward)
 
         return eventually_b & keep_a_until
 
 
+
+    
 class Negate:
     """ ¬X """
     def __init__(self, exp):
@@ -354,7 +396,11 @@ class Negate:
             self.neg = GT2(self.exp.term_a, self.exp.term_b, self.exp.dim)
         elif isinstance(self.exp, GEQ2):
             self.neg = LT2(self.exp.term_a, self.exp.term_b, self.exp.dim)
-
+        elif isinstance(self.exp, Until1):
+            part_a = Until1(And([self.exp.a, Negate(self.exp.b)]),
+                           And([Negate(self.exp.a), Negate(self.exp.b)]), self.exp.max_t)
+            part_b = Always(And([self.exp.a, Negate(self.exp.b)]), self.exp.max_t)
+            self.neg = Or([part_a, part_b])
         else:
             assert False, 'Class not supported %s' % str(type(exp))
 
