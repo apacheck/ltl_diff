@@ -6,9 +6,11 @@ import numpy as np
 def constraint_loss(constraint, ins, targets, zs, net, rollout_func):
     cond = constraint.condition(zs, ins, targets, net, rollout_func)
     
-    neg_losses = ltd.Negate(cond).loss(0)
+#     neg_losses = ltd.Negate(cond).loss(0)
     losses = cond.loss(0)
     sat = cond.satisfy(0)
+    neg_losses = torch.zeros(sat.shape)
+
         
     return neg_losses, losses, sat
 
