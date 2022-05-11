@@ -74,6 +74,87 @@ class LEQ:
     def satisfy(self, t):
         return (self.term_a.eval(t) <= self.term_b.eval(t)).all(1)
 
+    
+class GEQ2:
+    """ a >= b """
+
+    def __init__(self, term_a, term_b, dim=[0, 1], multiplier=1):
+        self.term_a = term_a
+        self.term_b = term_b
+        self.dim = dim
+        self.mutliplier = multiplier
+        assert term_b.x.shape[0] == len(dim)
+
+    def loss(self, t):
+        a = self.term_a.eval(t)[:, self.dim]
+        b = self.term_b.eval(t)
+        return (b - a).clamp(min=0.0).sum(1)
+        # return torch.square((b - a).clamp(min=0.0)).sum(1)
+
+    def satisfy(self, t):
+        return (self.term_a.eval(t)[:, self.dim] >= self.term_b.eval(t)).all(1)
+
+
+class LEQ2:
+    """ a >= b """
+
+    def __init__(self, term_a, term_b, dim=[0, 1], multiplier=1):
+        self.term_a = term_a
+        self.term_b = term_b
+        self.dim = dim
+        self.mutliplier = multiplier
+        assert term_b.x.shape[0] == len(dim)
+
+    def loss(self, t):
+        a = self.term_a.eval(t)[:, self.dim]
+        b = self.term_b.eval(t)
+        return (a - b).clamp(min=0.0).sum(1)
+        # return torch.square((a - b).clamp(min=0.0)).sum(1)
+
+    def satisfy(self, t):
+        return (self.term_b.eval(t) >= self.term_a.eval(t)[:, self.dim]).all(1)
+    
+class LT2:
+    """ a < b """
+
+    def __init__(self, term_a, term_b, dim=[0, 1], multiplier=1):
+        self.term_a = term_a
+        self.term_b = term_b
+        self.dim = dim
+        self.mutliplier = multiplier
+        assert term_b.x.shape[0] == len(dim)
+
+    def loss(self, t):
+        a = self.term_a.eval(t)[:, self.dim]
+        b = self.term_b.eval(t)
+        equality = (a == b).all(1).type(a.type())  # strict greater than, so equality penalized
+        return (a - b).clamp(min=0.0).sum(1) + equality
+
+    def satisfy(self, t):
+        return (self.term_a.eval(t)[:, self.dim] < self.term_b.eval(t)).all(1)
+
+class GT2:
+    """ a > b """
+
+    def __init__(self, term_a, term_b, dim=[0, 1], multiplier=1):
+        self.term_a = term_a
+        self.term_b = term_b
+        self.dim = dim
+        self.mutliplier = multiplier
+        assert term_b.x.shape[0] == len(dim)
+
+    def loss(self, t):
+        a = self.term_a.eval(t)[:, self.dim]
+        b = self.term_b.eval(t)
+        equality = (a == b).all(1).type(a.type())  # strict greater than, so equality penalized
+        return (b - a).clamp(min=0.0).sum(1) + equality
+        # return torch.square((b - a).clamp(min=0.0)).sum(1) + equality
+
+    def satisfy(self, t):
+        return (self.term_a.eval(t)[:, self.dim] > self.term_b.eval(t)).all(1)
+
+
+
 
 class GT:
     """ a > b """
@@ -265,6 +346,15 @@ class Negate:
             self.neg = Always(Negate(self.exp.exp), self.exp.max_t)
         elif isinstance(self.exp, Always):
             self.neg = Eventually(Negate(self.exp.exp), self.exp.max_t)
+        elif isinstance(self.exp, LT2):
+            self.neg = GEQ2(self.exp.term_a, self.exp.term_b, self.exp.dim)
+        elif isinstance(self.exp, GT2):
+            self.neg = LEQ2(self.exp.term_a, self.exp.term_b, self.exp.dim)
+        elif isinstance(self.exp, LEQ2):
+            self.neg = GT2(self.exp.term_a, self.exp.term_b, self.exp.dim)
+        elif isinstance(self.exp, GEQ2):
+            self.neg = LT2(self.exp.term_a, self.exp.term_b, self.exp.dim)
+
         else:
             assert False, 'Class not supported %s' % str(type(exp))
 
