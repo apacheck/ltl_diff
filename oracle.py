@@ -14,7 +14,7 @@ def evaluate_constraint(ins, targets, constraint, net, rollout_func, adversarial
 
     _, pos_losses , is_satisfied = constraint_loss(constraint, ins, targets, z_batches, net, rollout_func)
 
-    return torch.mean(pos_losses), torch.mean(is_satisfied.to(torch.float))
+    return torch.mean(pos_losses), is_satisfied.to(torch.float)
 
 
 def general_attack(input_batch, target_batch, constraint, domains, num_iters, net, rollout_func):
