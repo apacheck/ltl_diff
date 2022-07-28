@@ -210,7 +210,14 @@ class AvoidAndPatrolConstant:
     def domains(self, ins, targets):
         return fully_global_ins(ins, self.epsilon)
     
-class AutomaticSkill:
+class SkillConstraint:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+
+
+    """
     def __init__(self, symbols, suggestions_intermediate_all_pres, suggestions_intermediate_all_posts, suggestion_post, suggestion_unique, hard_constraints,
                  workspace_bnds, epsilon, opts):
         self.symbols = symbols
@@ -226,162 +233,41 @@ class AutomaticSkill:
     def condition(self, zs, ins, targets, net, rollout_func):
         weights = net(zs)
 
-        # Loop through all 4 corners of the center plane of the cube
-        offset = 0.0
-        corners = [[offset, offset]]
-        # corners = [[offset, offset], [offset, -offset], [-offset, offset], [-offset, -offset]]
-        for corner_x, corner_y in corners:
-            rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
-            rollout_traj_corner = rollout_traj
-            rollout_traj_corner[:, 0] += corner_x
-            rollout_traj_corner[:, 1] += corner_y
-            rollout_term = ltd.TermDynamic(rollout_traj_corner)
-            sym_ltd = dict()
-            for sym_name, sym in self.symbols.items():
-                bnds_list = []
-                if sym.get_type() == 'rectangle':
-                    for dim in sym.get_dims():
-                        bnds_list.append(ltd.GEQ2(rollout_term, ltd.TermStatic(sym.bounds[[dim], 0]), dim=np.array([dim])))
-                        bnds_list.append(ltd.LEQ2(rollout_term, ltd.TermStatic(sym.bounds[[dim], 1]), dim=np.array([dim])))
-                if sym.get_type() == 'circle':
-                    bnds_list.append(ltd.LT2(
-                        ltd.TermDynamic(torch.norm(rollout_term.xs - sym.get_center(), dim=2, keepdim=True)),
-                                       ltd.TermStatic(sym.get_radius()), dim=np.array([0])))
-                if sym.get_type() == "rectangle-ee":
-                    for dim in sym.get_dims():
-                        l_wrist = rollout_term.xs[:, :, 3]
-                        t_robot = rollout_term.xs[:, :, 2]
-                        t_wrist = rollout_term.xs[:, :, 5]
-                        x_robot = rollout_term.xs[:, :, 0]
-                        y_robot = rollout_term.xs[:, :, 1]
-                        l_ee = 0.1
-                        # dim == 0 -> x
-                        x_ee = l_ee * torch.cos(t_robot + t_wrist) + l_wrist * torch.sin(t_robot) + x_robot
-                        y_ee = l_ee * torch.sin(t_robot + t_wrist) - l_wrist * torch.cos(t_robot) + y_robot
-                        pos_ee = ltd.TermDynamic(torch.stack([x_ee, y_ee], dim=2))
-                        bnds_list.append(ltd.GEQ2(pos_ee, ltd.TermStatic(sym.bounds[[dim], 0]), dim=np.array([dim])))
-                        bnds_list.append(ltd.LEQ2(pos_ee, ltd.TermStatic(sym.bounds[[dim], 1]), dim=np.array([dim])))
-                if sym.get_type() == "circle-ee":
-                    l_wrist = rollout_term.xs[:, :, 3]
-                    t_robot = rollout_term.xs[:, :, 2]
-                    t_wrist = rollout_term.xs[:, :, 5]
-                    x_robot = rollout_term.xs[:, :, 0]
-                    y_robot = rollout_term.xs[:, :, 1]
-                    l_ee = 0.1
-                    # dim == 0 -> x
-                    x_ee = l_ee * torch.cos(t_robot + t_wrist) + l_wrist * torch.sin(t_robot) + x_robot
-                    y_ee = l_ee * torch.sin(t_robot + t_wrist) - l_wrist * torch.cos(t_robot) + y_robot
-                    pos_ee = torch.stack([x_ee, y_ee], dim=2)
-                    bnds_list.append(ltd.LT2(
-                        ltd.TermDynamic(torch.norm(pos_ee - sym.get_center(), dim=2, keepdim=True)),
-                        ltd.TermStatic(sym.get_radius()), dim=np.array([0])))
-                sym_ltd[sym_name] = bnds_list
-            neg_sym_ltd = dict()
-            for sym_name, sym in self.symbols.items():
-                bnds_list = []
-                if sym.get_type() == 'rectangle':
-                    for dim in sym.get_dims():
-                        bnds_list.append(ltd.LT2(rollout_term, ltd.TermStatic(sym.bounds[[dim], 0]), dim=np.array([dim])))
-                        bnds_list.append(ltd.GT2(rollout_term, ltd.TermStatic(sym.bounds[[dim], 1]), dim=np.array([dim])))
-                # neg_sym_ltd[sym_name] = ltd.Or(bnds_list)
-                if sym.get_type() == 'circle':
-                    bnds_list.append(ltd.GEQ2(
-                        ltd.TermDynamic(torch.norm(rollout_term.xs - sym.get_center(), dim=2, keepdim=True)),
-                        ltd.TermStatic(sym.get_radius()), dim=np.array([0])))
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
 
-                if sym.get_type() == "rectangle-ee":
-                    for dim in sym.get_dims():
-                        l_wrist = rollout_term.xs[:, :, 3]
-                        t_robot = rollout_term.xs[:, :, 2]
-                        t_wrist = rollout_term.xs[:, :, 5]
-                        x_robot = rollout_term.xs[:, :, 0]
-                        y_robot = rollout_term.xs[:, :, 1]
-                        l_ee = 0.1
-                        # dim == 0 -> x
-                        x_ee = l_ee * torch.cos(t_robot + t_wrist) + l_wrist * torch.sin(t_robot) + x_robot
-                        y_ee = l_ee * torch.sin(t_robot + t_wrist) - l_wrist * torch.cos(t_robot) + y_robot
-                        pos_ee = ltd.TermDynamic(torch.stack([x_ee, y_ee], dim=2))
-                        bnds_list.append(ltd.LT2(pos_ee, ltd.TermStatic(sym.bounds[[dim], 0]), dim=np.array([dim])))
-                        bnds_list.append(ltd.GT2(pos_ee, ltd.TermStatic(sym.bounds[[dim], 1]), dim=np.array([dim])))
-                if sym.get_type() == "circle-ee":
-                    l_wrist = rollout_term.xs[:, :, 3]
-                    t_robot = rollout_term.xs[:, :, 2]
-                    t_wrist = rollout_term.xs[:, :, 5]
-                    x_robot = rollout_term.xs[:, :, 0]
-                    y_robot = rollout_term.xs[:, :, 1]
-                    l_ee = 0.1
-                    # dim == 0 -> x
-                    x_ee = l_ee * torch.cos(t_robot + t_wrist) + l_wrist * torch.sin(t_robot) + x_robot
-                    y_ee = l_ee * torch.sin(t_robot + t_wrist) - l_wrist * torch.cos(t_robot) + y_robot
-                    pos_ee = torch.stack([x_ee, y_ee], dim=2)
-                    bnds_list.append(ltd.GEQ2(
-                        ltd.TermDynamic(torch.norm(pos_ee - sym.get_center(), dim=2, keepdim=True)),
-                        ltd.TermStatic(sym.get_radius()), dim=np.array([0])))
-                neg_sym_ltd[sym_name] = bnds_list
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
 
-            # A postcondition or the same precondition will always come after a given precondition
-            # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
-            implication_next_list = []
-            for suggestion_intermediate in self.suggestions_intermediate_all_posts:
-                # A post will come after the pres
-                pre_list = []
-                for p, val in suggestion_intermediate[0].items():
-                    if val:
-                        pre_list.extend([ltd.And(sym_ltd[p])])
-                    else:
-                        pre_list.extend([ltd.Or(neg_sym_ltd[p])])
-                pre_ltd = ltd.Next(ltd.And(pre_list))
+        # A postcondition or the same precondition will always come after a given precondition
+        # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
+        implication_next_list = []
+        for suggestion_intermediate in self.suggestions_intermediate_all_posts:
+            # A post will come after the pres
+            pre_ltd = ltd.Next(create_sym_state_constraint(suggestion_intermediate[0], sym_ltd, neg_sym_ltd))
+            neg_pre_ltd = create_neg_sym_state_constraint(suggestion_intermediate[0], sym_ltd, neg_sym_ltd)
 
-                neg_pre_list = []
-                for p, val in suggestion_intermediate[0].items():
-                    if val:
-                        neg_pre_list.extend([ltd.Or(neg_sym_ltd[p])])
-                    else:
-                        neg_pre_list.extend([ltd.And(sym_ltd[p])])
-                neg_pre_ltd = ltd.Or(neg_pre_list)
+            all_posts_list = []
+            for post in suggestion_intermediate[1]:
+                all_posts_list.append(ltd.Next(create_sym_state_constraint(post, sym_ltd, neg_sym_ltd)))
 
-                all_posts_list = []
-                for post in suggestion_intermediate[1]:
-                    post_list = []
-                    for p, val in post.items():
-                        if val:
-                            post_list.extend([ltd.And(sym_ltd[p])])
-                        else:
-                            post_list.extend([ltd.Or(neg_sym_ltd[p])])
-                    all_posts_list.append(ltd.Next(ltd.And(post_list)))
-                if len(all_posts_list) == 1:
-                    all_posts_ltd = all_posts_list[0]
-                else:
-                    all_posts_ltd = ltd.Or(all_posts_list)
-
-                # implication_next_ltd = ltd.Always(ltd.Or([neg_pre_ltd, ltd.Next(ltd.Or(all_posts_list + [pre_ltd]))]), rollout_traj.shape[1]-1)
-                # implication_next_ltd = ltd.Always(ltd.Or([neg_pre_ltd, ltd.Or(all_posts_list + [pre_ltd])]), rollout_traj.shape[1]-1)
-                implication_next_ltd = ltd.Always(ltd.Or([neg_pre_ltd] + all_posts_list + [pre_ltd]), rollout_traj.shape[1]-1)
-                implication_next_list.extend([implication_next_ltd])
+            implication_next_ltd = ltd.Always(ltd.Or([neg_pre_ltd] + all_posts_list + [pre_ltd]), rollout_traj.shape[1]-1)
+            implication_next_list.extend([implication_next_ltd])
 
         # Always stay in states in the specification
         always_list = []
         for state in self.suggestion_unique:
-            state_list = []
-            for s, val in state.items():
-                if val:
-                    state_list.extend([ltd.And(sym_ltd[s])])
-                else:
-                    state_list.extend([ltd.Or(neg_sym_ltd[s])])
-            always_list.append(ltd.And(state_list))
-
+            always_list.append(create_sym_state_constraint(state, sym_ltd, neg_sym_ltd))
         if len(always_list) == 1:
             always_ltd = ltd.Always(always_list[0], rollout_traj.shape[1])
         else:
             always_ltd = ltd.Always(ltd.Or(always_list), rollout_traj.shape[1])
 
-
-
         final_list = []
-        if "implication_next" in self.opts:
-            final_list.extend(implication_next_list)
-        if "always" in self.opts:
-            final_list.append(always_ltd)
+        final_list.extend(implication_next_list)
+        final_list.append(always_ltd)
+
         # Stretch LTD constraints:
         # The stretch dmps are in configuration/joint space instead of cartesian space.
         # We therefore need to constrain the end effector cartesian coordinate based on the joint angles
@@ -500,6 +386,8 @@ class AutomaticIntermediateSteps:
         # A post will come after the pres
         pre_list = []
         for p, val in self.suggestion_intermediate[0].items():
+            if len(sym_ltd[p]) == 0:
+                continue
             if val:
                 pre_list.append(sym_ltd[p])
             else:
@@ -509,6 +397,8 @@ class AutomaticIntermediateSteps:
         # A post will come after the pres
         neg_pre_list = []
         for p, val in self.suggestion_intermediate[0].items():
+            if len(sym_ltd[p]) == 0:
+                continue
             if val:
                 neg_pre_list.append(neg_sym_ltd[p])
             else:
@@ -519,6 +409,8 @@ class AutomaticIntermediateSteps:
         for post in self.suggestion_intermediate[1]:
             post_list = []
             for p, val in post.items():
+                if len(sym_ltd[p]) == 0:
+                    continue
                 if val:
                     post_list.append(sym_ltd[p])
                 else:
@@ -531,14 +423,38 @@ class AutomaticIntermediateSteps:
 
         until_ltd = ltd.Until1(pre_ltd, all_posts_ltd, rollout_traj.shape[1])
         implication_ltd = ltd.Always(ltd.Or([neg_pre_ltd, until_ltd]), rollout_traj.shape[1])
-        eventually_post_ltd = ltd.Eventually(all_posts_ltd, rollout_traj.shape[1])
-        eventually_pre_ltd = ltd.Eventually(pre_ltd, rollout_traj.shape[1])
-        final_ltd = ltd.And([implication_ltd, eventually_post_ltd, eventually_pre_ltd])
+        # eventually_post_ltd = ltd.Eventually(all_posts_ltd, rollout_traj.shape[1])
+        # eventually_pre_ltd = ltd.Eventually(pre_ltd, rollout_traj.shape[1])
+        # final_ltd = ltd.And([implication_ltd, eventually_post_ltd, eventually_pre_ltd])
 
         return implication_ltd
 
     def domains(self, ins, targets):
         return fully_global_ins(ins, self.epsilon)
+
+    def string(self):
+        # Prints the specification in the format:
+        # (!pre_sym1 | !pre_sym2 | ... ) -> (pre_sym1 & pre_sym2 & ...) U (post_cond1 | post_cond2 | ...)
+        neg_pre_print = []
+        pre_print = []
+        for p, val in self.suggestion_intermediate[0].items():
+            if val:
+                neg_pre_print.append("!" + p)
+                pre_print.append(p)
+            else:
+                neg_pre_print.append(p)
+                pre_print.append("!" + p)
+
+        post_print = []
+        for post in self.suggestion_intermediate[1]:
+            one_post_list = []
+            for p, val in post.items():
+                if val:
+                    one_post_list.append(p)
+                else:
+                    one_post_list.append("!" + p)
+            post_print.append("(" + " & ".join(one_post_list) + ")")
+        return "({}) -> (({}) U ({}))".format(" | ".join(neg_pre_print), " & ".join(pre_print), " | ".join(post_print))
 
 
 class States:
@@ -601,6 +517,8 @@ class States:
         for pre in self.suggestions_pre:
             pre_list = []
             for p, val in pre.items():
+                if len(sym_ltd[p]) == 0:
+                    continue
                 if val:
                     pre_list.append(sym_ltd[p])
                 else:
@@ -610,4 +528,503 @@ class States:
 
     def domains(self, ins, targets):
         return fully_global_ins(ins, self.epsilon)
+
+
+class AlwaysFormula:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formula, epsilon):
+        self.symbols = symbols
+        self.formula = formula
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        ltd_formula = create_sym_state_constraint(self.formula, sym_ltd, neg_sym_ltd)
+
+        return ltd.Always(ltd_formula, rollout_traj.shape[1])
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+class EventuallyOrFormulas:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas, epsilon):
+        self.symbols = symbols
+        self.formulas = formulas
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        ltd_formulas = []
+        for formula in self.formulas:
+            ltd_formulas.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+
+        if len(ltd_formulas) == 1:
+            ltd_formulas_or = ltd_formulas[0]
+        else:
+            ltd_formulas_or = ltd.Or(ltd_formulas)
+
+        return ltd.Eventually(ltd_formulas_or, rollout_traj.shape[1])
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+class AndEventuallyFormulas:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas, epsilon):
+        self.symbols = symbols
+        self.formulas = formulas
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        ltd_formulas = []
+        for formula in self.formulas:
+            ltd_formulas.append(ltd.Eventually(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd), rollout_traj.shape[1]))
+
+        if len(ltd_formulas) == 1:
+            ltd_formulas_and = ltd_formulas[0]
+        else:
+            ltd_formulas_and = ltd.And(ltd_formulas)
+
+        return ltd_formulas_and
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+
+class SequenceFormulas:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas, epsilon):
+        self.symbols = symbols
+        self.formulas = formulas
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        ltd_formulas = []
+        ltd_formulas_neg = []
+        for formula in self.formulas:
+            ltd_formulas.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+            ltd_formulas_neg.append(create_neg_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+
+        # A postcondition or the same precondition will always come after a given precondition
+        # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
+        sequence_list = []
+        for ii in range(len(self.formulas) - 1):
+            # A post will come after the pres
+
+            one_step = ltd.Always(ltd.Or([ltd_formulas_neg[ii], ltd.Next(ltd.Or([ltd_formulas[ii], ltd_formulas[ii + 1]]))]), rollout_traj.shape[1] - 1)
+            sequence_list.append(one_step)
+
+        if len(sequence_list) == 1:
+            ltd_formulas_and = sequence_list[0]
+        else:
+            ltd_formulas_and = ltd.And(sequence_list)
+
+        return ltd_formulas_and
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+
+class SequenceFormulasAndAlways:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas_sequence, formulas_always, epsilon):
+        self.symbols = symbols
+        self.formulas_sequence = formulas_sequence
+        self.formulas_always = formulas_always
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        # The sequence part
+        ltd_formulas = []
+        ltd_formulas_neg = []
+        for formula in self.formulas_sequence:
+            ltd_formulas.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+            ltd_formulas_neg.append(create_neg_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+
+        # A postcondition or the same precondition will always come after a given precondition
+        # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
+        sequence_list = []
+        for ii in range(len(self.formulas_sequence) - 1):
+            # A post will come after the pres
+
+            one_step = ltd.Always(ltd.Or([ltd_formulas_neg[ii], ltd.Next(ltd.Or([ltd_formulas[ii], ltd_formulas[ii + 1]]))]), rollout_traj.shape[1] - 1)
+            sequence_list.append(one_step)
+
+        # The always part
+        always_list = []
+        for formula in self.formulas_always:
+            always_list.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+        if len(always_list) == 1:
+            ltd_always_or = always_list[0]
+        else:
+            ltd_always_or = ltd.Or(always_list)
+
+        formula_list = []
+        formula_list.extend(sequence_list)
+        formula_list.append(ltd.Always(ltd_always_or, rollout_traj.shape[1]))
+        if len(formula_list) == 1:
+            ltd_formulas_and = formula_list[0]
+        else:
+            ltd_formulas_and = ltd.And(formula_list)
+
+        return ltd_formulas_and
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+
+class SequenceFormulasMultiplePostsAndAlways:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas_sequence, formulas_always, epsilon):
+        self.symbols = symbols
+        self.formulas_sequence = formulas_sequence
+        self.formulas_always = formulas_always
+        self.epsilon = epsilon
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        # The sequence part
+        # A postcondition or the same precondition will always come after a given precondition
+        # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
+        sequence_list = []
+        for pre, posts in self.formulas_sequence:
+            # A post will come after the pres
+            ltd_pos_pre = create_sym_state_constraint(pre, sym_ltd, neg_sym_ltd)
+            ltd_neg_pre = create_neg_sym_state_constraint(pre, sym_ltd, neg_sym_ltd)
+            post_list = []
+            for post in posts:
+                post_list.append(create_sym_state_constraint(post, sym_ltd, neg_sym_ltd))
+            ltd_next_or_list = [ltd_pos_pre]
+            ltd_next_or_list.extend(post_list)
+
+            one_step = ltd.Always(ltd.Or([ltd_neg_pre, ltd.Next(ltd.Or(ltd_next_or_list))]), rollout_traj.shape[1] - 1)
+            sequence_list.append(one_step)
+
+        # The always part
+        always_list = []
+        ltd_always_or = None
+        if self.formulas_always is not None:
+
+            for formula in self.formulas_always:
+                always_list.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+            if len(always_list) == 1:
+                ltd_always_or = always_list[0]
+            else:
+                ltd_always_or = ltd.Or(always_list)
+
+        formula_list = []
+        formula_list.extend(sequence_list)
+        if ltd_always_or is not None:
+            formula_list.append(ltd.Always(ltd_always_or, rollout_traj.shape[1]))
+        if len(formula_list) == 1:
+            ltd_formulas_and = formula_list[0]
+        else:
+            ltd_formulas_and = ltd.And(formula_list)
+
+        return ltd_formulas_and
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+
+class SequenceFormulasMultiplePostsAndAlwaysWithIK:
+    """
+    This will create the constraints on a trajectory to obey the skill.
+
+    Constraint:
+    Formula is dict of true/false, everything else is not constrained
+
+    """
+    def __init__(self, symbols, formulas_sequence, formulas_always, epsilon):
+        self.symbols = symbols
+        self.formulas_sequence = formulas_sequence
+        self.formulas_always = formulas_always
+        self.epsilon = epsilon
+        self.max_ext = 0.91
+
+    def condition(self, zs, ins, targets, net, rollout_func):
+        weights = net(zs)
+
+        # The actual trajectory
+        rollout_traj = rollout_func(zs[:, 0], zs[:, -1], weights)[0]
+        rollout_term = ltd.TermDynamic(rollout_traj)
+
+        # Each symbol corresponds to a constraint
+        sym_ltd, neg_sym_ltd = create_sym_and_neg_ltd_dicts(self.symbols, rollout_term)
+
+        # The sequence part
+        # A postcondition or the same precondition will always come after a given precondition
+        # pre -> N (pre | posts) is the same as !pre | N (pre | posts)
+        sequence_list = []
+        for pre, posts in self.formulas_sequence:
+            # A post will come after the pres
+            ltd_pos_pre = create_sym_state_constraint(pre, sym_ltd, neg_sym_ltd)
+            ltd_neg_pre = create_neg_sym_state_constraint(pre, sym_ltd, neg_sym_ltd)
+            post_list = []
+            for post in posts:
+                post_list.append(create_sym_state_constraint(post, sym_ltd, neg_sym_ltd))
+            ltd_next_or_list = [ltd_pos_pre]
+            ltd_next_or_list.extend(post_list)
+
+            one_step = ltd.Always(ltd.Or([ltd_neg_pre, ltd.Next(ltd.Or(ltd_next_or_list))]), rollout_traj.shape[1] - 1)
+            sequence_list.append(one_step)
+
+        # The always part
+        always_list = []
+        for formula in self.formulas_always:
+            always_list.append(create_sym_state_constraint(formula, sym_ltd, neg_sym_ltd))
+        if len(always_list) == 1:
+            ltd_always_or = always_list[0]
+        else:
+            ltd_always_or = ltd.Or(always_list)
+
+        # ltd_Ik
+        est_ext_squared = ltd.TermDynamic(torch.square(rollout_term.xs[:, :, 0:1] - rollout_term.xs[:, :, 2:3]) + torch.square(rollout_term.xs[:, :, 1:2] - rollout_term.xs[:, :, 3:4]))
+        ltd_ik = ltd.Always(ltd.LT2(est_ext_squared, ltd.TermStatic(torch.Tensor([self.max_ext * self.max_ext])), dim=[0]), rollout_traj.shape[1])
+
+
+        formula_list = []
+        formula_list.extend(sequence_list)
+        formula_list.append(ltd.Always(ltd_always_or, rollout_traj.shape[1]))
+        formula_list.append(ltd_ik)
+        if len(formula_list) == 1:
+            ltd_formulas_and = formula_list[0]
+        else:
+            ltd_formulas_and = ltd.And(formula_list)
+
+        return ltd_formulas_and
+
+    def domains(self, ins, targets):
+        return fully_global_ins(ins, self.epsilon)
+
+
+# def create_sym_constraint(sym, rollout_term):
+#     """
+#     Creates the list of constraints a symbol has
+#
+#     #TODO: Circles
+#
+#     :return:
+#     """
+#     bnds_list = []
+#     if sym.get_type() == 'rectangle':
+#         if sym.transform is None:
+#             if len(sym.get_dims()) == 2:
+#                 rollout_term_selected = ltd.TermDynamic(rollout_term.xs[:, :, sym.get_dims()])
+#                 return ltd.InRectangle(rollout_term_selected, ltd.TermStatic([sym.bounds[0, 0], sym.bounds[1, 0], sym.bounds[0, 1], sym.bounds[1, 1]]))
+#             for ii, dim in enumerate(sym.get_dims()):
+#                 bnds_list.append(ltd.GEQ2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([dim])))
+#                 bnds_list.append(ltd.LEQ2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([dim])))
+#         elif sym.transform in ['ee']:
+#             # Transform via stretch fk
+#             ee_traj = ltd.TermDynamic(fk_stretch(rollout_term.xs))
+#             if len(sym.get_plot_dims()) == 2:
+#                 rollout_term_selected = ltd.TermDynamic(ee_traj.xs[:, :, sym.get_plot_dims()])
+#                 return ltd.InRectangle(rollout_term_selected, ltd.TermStatic([sym.bounds[0, 0], sym.bounds[1, 0], sym.bounds[0, 1], sym.bounds[1, 1]]))
+#             for ii, dim in enumerate(sym.get_plot_dims()):
+#                 bnds_list.append(ltd.GEQ2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([ii])))
+#                 bnds_list.append(ltd.LEQ2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([ii])))
+#
+#     return ltd.And(bnds_list)
+
+
+def create_sym_constraint(sym, rollout_term):
+    """
+    Creates the list of constraints a symbol has
+
+    #TODO: Circles
+
+    :return:
+    """
+    bnds_list = []
+    if sym.get_type() == 'rectangle':
+        if sym.transform is None:
+            for ii, dim in enumerate(sym.get_dims()):
+                bnds_list.append(ltd.GEQ2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([dim])))
+                bnds_list.append(ltd.LEQ2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([dim])))
+        elif sym.transform in ['ee']:
+            # Transform via stretch fk
+            ee_traj = ltd.TermDynamic(fk_stretch(rollout_term.xs))
+            for ii, dim in enumerate(sym.get_plot_dims()):
+                bnds_list.append(ltd.GEQ2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([ii])))
+                bnds_list.append(ltd.LEQ2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([ii])))
+
+    return ltd.And(bnds_list)
+
+
+def create_neg_sym_constraint(sym, rollout_term):
+    """
+    Creates the list of constraints a symbol has
+
+    #TODO: Circles
+
+    :return:
+    """
+    bnds_list = []
+    if sym.get_type() == 'rectangle':
+        if sym.transform is None:
+            for ii, dim in enumerate(sym.get_dims()):
+                bnds_list.append(ltd.LT2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([dim])))
+                bnds_list.append(ltd.GT2(rollout_term, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([dim])))
+        elif sym.transform in ['ee']:
+            # Transform via stretch fk
+            ee_traj = ltd.TermDynamic(fk_stretch(rollout_term.xs))
+            for ii, dim in enumerate(sym.get_plot_dims()):
+                bnds_list.append(ltd.LT2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 0]), dim=np.array([ii])))
+                bnds_list.append(ltd.GT2(ee_traj, ltd.TermStatic(sym.bounds[[ii], 1]), dim=np.array([ii])))
+
+    return ltd.Or(bnds_list)
+
+def create_sym_state_constraint(sym_state, sym_ltd, neg_sym_ltd):
+    constraint_list = []
+    for sym, truth_value in sym_state.items():
+        # if len(sym_ltd[sym].exprs) == 0:
+        #     continue
+        if truth_value:
+            constraint_list.extend([sym_ltd[sym]])
+        else:
+            constraint_list.extend([neg_sym_ltd[sym]])
+
+    return ltd.And(constraint_list)
+
+def create_neg_sym_state_constraint(sym_state, sym_ltd, neg_sym_ltd):
+    constraint_list = []
+    for sym, truth_value in sym_state.items():
+        # if len(sym_ltd[sym].exprs) == 0:
+        #     continue
+        if truth_value:
+            constraint_list.extend([neg_sym_ltd[sym]])
+        else:
+            constraint_list.extend([sym_ltd[sym]])
+
+    return ltd.Or(constraint_list)
+
+def fk_stretch(rollout):
+    """
+    Foward kinematics of the stretch
+
+    :param rollout:
+    :return:
+    """
+    wrist_x_in_base_frame = 0.14
+    wrist_y_in_base_frame = -0.16
+    gripper_length_xy = 0.23
+    gripper_offset_z = -0.1
+    base_height_z = 0.05
+
+    x_robot = rollout[:, :, 0]
+    y_robot = rollout[:, :, 1]
+    t_robot = rollout[:, :, 2]
+    arm_extension = rollout[:, :, 3]
+    lift = rollout[:, :, 4]
+    t_wrist = rollout[:, :, 5]
+    x_ee_in_robot = wrist_x_in_base_frame + gripper_length_xy * torch.sin(t_wrist)
+    y_ee_in_robot = wrist_y_in_base_frame - arm_extension - gripper_length_xy * torch.cos(t_wrist)
+
+    x_ee_in_global = x_ee_in_robot * torch.cos(t_robot) - y_ee_in_robot * torch.sin(t_robot) + x_robot
+    y_ee_in_global = x_ee_in_robot * torch.sin(t_robot) + y_ee_in_robot * torch.cos(t_robot) + y_robot
+    z_ee_in_global = lift + gripper_offset_z + base_height_z
+
+    return torch.stack([x_ee_in_global, y_ee_in_global, z_ee_in_global], dim=2)
+
+def create_sym_and_neg_ltd_dicts(symbols, rollout_term):
+    sym_ltd = dict()
+    for sym_name, sym in symbols.items():
+        one_sym_ltd = create_sym_constraint(sym, rollout_term)
+        sym_ltd[sym_name] = one_sym_ltd
+
+    neg_sym_ltd = dict()
+    for sym_name, sym in symbols.items():
+        one_sym_neg_ltd = create_neg_sym_constraint(sym, rollout_term)
+        neg_sym_ltd[sym_name] = one_sym_neg_ltd
+
+    return sym_ltd, neg_sym_ltd
 

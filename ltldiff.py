@@ -88,6 +88,7 @@ class GEQ2:
     def loss(self, t):
         a = self.term_a.eval(t)[:, self.dim]
         b = self.term_b.eval(t)
+        # return torch.exp(b - a).sum(1)
         return (b - a).clamp(min=0.0).sum(1)
         # return torch.square((b - a).clamp(min=0.0)).sum(1)
 
@@ -108,6 +109,7 @@ class LEQ2:
     def loss(self, t):
         a = self.term_a.eval(t)[:, self.dim]
         b = self.term_b.eval(t)
+        # return torch.exp(a - b).sum(1)
         return (a - b).clamp(min=0.0).sum(1)
         # return torch.square((a - b).clamp(min=0.0)).sum(1)
 
@@ -128,6 +130,7 @@ class LT2:
         a = self.term_a.eval(t)[:, self.dim]
         b = self.term_b.eval(t)
         equality = (a == b).all(1).type(a.type())  # strict greater than, so equality penalized
+        # return torch.exp(a - b).sum(1) + equality
         return (a - b).clamp(min=0.0).sum(1) + equality
 
     def satisfy(self, t):
@@ -147,13 +150,31 @@ class GT2:
         a = self.term_a.eval(t)[:, self.dim]
         b = self.term_b.eval(t)
         equality = (a == b).all(1).type(a.type())  # strict greater than, so equality penalized
+        # return torch.exp(b - a).sum(1) + equality
         return (b - a).clamp(min=0.0).sum(1) + equality
         # return torch.square((b - a).clamp(min=0.0)).sum(1) + equality
 
     def satisfy(self, t):
         return (self.term_a.eval(t)[:, self.dim] > self.term_b.eval(t)).all(1)
 
+class InRectangle:
+    """ inside a rectangle with bottom left corner b0, b1 and upper right corner b2, b3"""
 
+    def __init__(self, term_a, term_b):
+        self.term_a = term_a
+        self.term_b = term_b
+
+    def loss(self, t):
+        a = self.term_a.eval(t)
+        b = self.term_b.eval(t)
+        return (a[:, 0] - b[2]).clamp(min=0.0) + (b[0] - a[:, 0]).clamp(min=0.0) + (a[:, 1] - b[3]).clamp(min=0.0) + (b[1] - a[:, 1]).clamp(min=0.0)
+
+    def satisfy(self, t):
+        a = self.term_a.eval(t)
+        b = self.term_b.eval(t)
+        and1 = torch.logical_and(a[:, 0] < b[2], b[0] < a[:, 0])
+        and2 = torch.logical_and(a[:, 1] - b[3], b[1] - a[:, 1])
+        return torch.logical_and(and1, and2)
 
 
 class GT:
